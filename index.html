@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="ru" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Доска посещаемости</title>
+
+  <!-- Tailwind (для MVP через CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Шрифт (системный фолбэк) -->
+  <style>
+    :root {
+      --brand: #2563eb; /* индиго */
+      --ok: #16a34a;
+      --no: #ef4444;
+      --late: #f59e0b;
+      --exc: #3b82f6;
+    }
+    html, body { height: 100%; }
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    /* компактные элементы */
+    .input, .select, .btn {
+      height: 40px;
+      border: 1px solid rgba(100,116,139,.35);
+      border-radius: .6rem;
+      padding: 0 .75rem;
+      background: var(--tw-bg);
+    }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: .5rem; font-weight: 600;
+    }
+    .btn-primary { background: var(--brand); color: #fff; border-color: transparent; }
+    .btn-primary:hover { filter: brightness(.95); }
+    .btn-ghost { background: transparent; }
+    .pill { padding: .35rem .6rem; border-radius: 999px; border: 1px solid rgba(100,116,139,.35); font-size: .85rem; }
+    /* таблица */
+    th, td { padding: .5rem .5rem; }
+    thead th { position: sticky; top: 0; background: var(--tw-bg); z-index: 1; }
+    /* светлая/тёмная палитра через data-theme */
+    :root[data-theme="light"] { --tw-bg: #ffffff; --tw-card:#ffffff; --tw-muted:#64748b; --tw-text:#0f172a; --tw-soft:#f1f5f9; }
+    :root[data-theme="dark"]  { --tw-bg: #0b1020; --tw-card:#0e1424; --tw-muted:#93a4b8; --tw-text:#e5edf7; --tw-soft:#11182b; }
+    body { color: var(--tw-text); background: var(--tw-soft); }
+    .card { background: var(--tw-card); border: 1px solid rgba(100,116,139,.25); border-radius: 1rem; }
+    .muted { color: var(--tw-muted); }
+    /* статус-точки в селектах покажем в легенде */
+    .legend-dot { width:.6rem; height:.6rem; border-radius:999px; display:inline-block; margin-right:.35rem; vertical-align:middle; }
+    /* поле-заметка */
+    .note { width: 16rem; height: 40px; border:1px solid rgba(100,116,139,.35); border-radius:.6rem; padding:.5rem .6rem; background: var(--tw-bg); }
+    /* плавности */
+    .fade { transition: background .2s, border-color .2s, color .2s, opacity .2s; }
+  </style>
+</head>
+<body class="h-full">
+  <!-- Навбар -->
+  <header class="w-full">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="text-lg font-bold">Attendance</div>
+        <div class="muted text-sm">минимализм</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="themeBtn" class="btn btn-ghost fade" title="Тема">🌓</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- LOGIN -->
+  <main id="loginView" class="max-w-md mx-auto px-4">
+    <div class="card p-6 mt-6">
+      <h1 class="text-xl font-semibold mb-1">Вход</h1>
+      <p class="muted text-sm mb-4">Email/пароль через Firebase. Для куратора есть код.</p>
+
+      <div class="flex flex-col gap-3">
+        <input id="loginEmail" type="email" placeholder="Email" class="input fade" />
+        <input id="loginPass" type="password" placeholder="Пароль" class="input fade" />
+        <label class="flex items-center gap-2 select-none">
+          <input id="isCurator" type="checkbox" class="h-4 w-4" />
+          <span class="text-sm">Войти как куратор</span>
+        </label>
+        <input id="curatorCode" type="password" placeholder="Код куратора (curratorPO115)" class="input fade hidden" />
+        <div class="flex gap-2">
+          <button id="btnLogin" class="btn btn-primary w-full fade">Войти</button>
+          <button id="btnRegister" class="btn w-full fade">Регистрация</button>
+        </div>
+        <div id="loginError" class="text-red-500 text-sm min-h-5"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- APP -->
+  <section id="appView" class="hidden">
+    <div class="max-w-6xl mx-auto px-4">
+      <!-- панель -->
+      <div class="flex flex-wrap items-center justify-between gap-2 mt-6">
+        <div class="flex items-center gap-2">
+          <span id="rolePill" class="pill">Роль: —</span>
+          <span id="userEmailPill" class="pill">—</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <input id="datePicker" type="date" class="input fade" />
+          <button id="btnToday" class="btn fade">Сегодня</button>
+          <button id="btnPrev" class="btn fade">◀</button>
+          <button id="btnNext" class="btn fade">▶</button>
+          <button id="btnLogout" class="btn fade">Выйти</button>
+        </div>
+      </div>
+
+      <!-- карточка таблицы -->
+      <div class="card mt-4">
+        <div class="p-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-lg font-semibold">Группа</h2>
+          <div class="flex items-center gap-2">
+            <button id="btnAddStudent" class="btn fade">+ Студент</button>
+            <button id="btnSeedWeek" class="btn fade">Сгенерировать неделю</button>
+          </div>
+        </div>
+
+        <div class="px-4 pb-2 text-sm muted flex flex-wrap gap-3">
+          <span><span class="legend-dot" style="background:var(--ok)"></span>Присутствует</span>
+          <span><span class="legend-dot" style="background:var(--no)"></span>Отсутствует</span>
+          <span><span class="legend-dot" style="background:var(--late)"></span>Опоздал</span>
+          <span><span class="legend-dot" style="background:var(--exc)"></span>Уваж. причина</span>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-slate-300/30">
+                <th class="text-left">#</th>
+                <th class="text-left">ФИО</th>
+                <th class="text-left">Колледж</th>
+                <th class="text-left">Пара 1</th>
+                <th class="text-left">Пара 2</th>
+                <th class="text-left">Пара 3</th>
+                <th class="text-left">Пара 4</th>
+                <th class="text-left">Примечание</th>
+                <th class="text-left">×</th>
+              </tr>
+            </thead>
+            <tbody id="studentsTbody"></tbody>
+          </table>
+        </div>
+
+        <div class="p-4 pt-2 muted text-xs">Сохранение — автоматически. Лог уходит в Google Sheets.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Firebase v12 (модульный SDK) -->
+  <script type="module">
+    // ---------- ТЕМА ----------
+    const root = document.documentElement;
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    root.setAttribute('data-theme', savedTheme);
+    document.getElementById('themeBtn').onclick = () => {
+      const t = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      root.setAttribute('data-theme', t);
+      localStorage.setItem('theme', t);
+    };
+
+    // ---------- CONFIG (твои данные) ----------
+    const APPS_SCRIPT_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzk2O9KheZ5hHr4ToZEwusTyo7KIZiibsTdVIE4TfD_flOVCm03h8bbITmSFHENZY795Q/exec";
+    const CURATOR_CODE = "curratorPO115";
+    const firebaseConfig = {
+      apiKey: "AIzaSyCGbrupPjSnF-LhhZYTLUByqyC7gdZVu3A",
+      authDomain: "attendance-board-e6f4e.firebaseapp.com",
+      projectId: "attendance-board-e6f4e",
+      storageBucket: "attendance-board-e6f4e.appspot.com",   // <-- исправлено
+      messagingSenderId: "271675873815",
+      appId: "1:271675873815:web:8eb88f71fb1eee400f5a52",
+      measurementId: "G-L20GH2G0SP"
+    };
+
+    // ---------- Imports ----------
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+    import {
+      getFirestore, collection, doc, setDoc, getDocs, onSnapshot, query, orderBy,
+      addDoc, deleteDoc, serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
+
+    // ---------- Init ----------
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // ---------- UI refs ----------
+    const loginView = document.getElementById('loginView');
+    const appView   = document.getElementById('appView');
+    const loginEmail = document.getElementById('loginEmail');
+    const loginPass = document.getElementById('loginPass');
+    const isCurator = document.getElementById('isCurator');
+    const curatorCode = document.getElementById('curatorCode');
+    const btnLogin = document.getElementById('btnLogin');
+    const btnRegister = document.getElementById('btnRegister');
+    const loginError = document.getElementById('loginError');
+
+    const rolePill = document.getElementById('rolePill');
+    const userEmailPill = document.getElementById('userEmailPill');
+    const datePicker = document.getElementById('datePicker');
+    const btnPrev = document.getElementById('btnPrev');
+    const btnNext = document.getElementById('btnNext');
+    const btnToday = document.getElementById('btnToday');
+    const btnLogout = document.getElementById('btnLogout');
+    const btnAddStudent = document.getElementById('btnAddStudent');
+    const btnSeedWeek = document.getElementById('btnSeedWeek');
+    const tbody = document.getElementById('studentsTbody');
+
+    // ---------- State ----------
+    let currentUser = null;
+    let currentRole = 'starosta';
+    let unsubStudents = null;
+    let unsubDay = null;
+
+    const STATUS = [
+      {key:'present', title:'Присутствует', color:'var(--ok)'},
+      {key:'absent',  title:'Отсутствует',  color:'var(--no)'},
+      {key:'late',    title:'Опоздал',      color:'var(--late)'},
+      {key:'excused', title:'Уваж. причина',color:'var(--exc)'},
+    ];
+
+    // ---------- Helpers ----------
+    function toDateKey(d) {
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const dd = String(d.getDate()).padStart(2,'0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    function fromDateKey(k) {
+      const [y,m,d] = k.split('-').map(Number);
+      return new Date(y, m-1, d);
+    }
+    function todayKey(){ return toDateKey(new Date()); }
+
+    function statusSelect(field, current) {
+      const opts = STATUS.map(st =>
+        `<option value="${st.key}" ${st.key===current?'selected':''}>${st.title}</option>`
+      ).join('');
+      return `<select class="select fade" data-field="${field}">${opts}</select>`;
+    }
+
+    function escapeHtml(s='') {
+      return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+    function escapeAttr(s='') { return escapeHtml(s); }
+
+    // FS helpers
+    const collStudents = () => collection(db, 'students');
+    const docAttendanceDate = (dateKey) => doc(db, 'attendance', dateKey);
+    const collAttendanceStudents = (dateKey) => collection(db, 'attendance', dateKey, 'students');
+
+    // ---------- Curator toggle ----------
+    isCurator.addEventListener('change', () => {
+      curatorCode.classList.toggle('hidden', !isCurator.checked);
+    });
+
+    // ---------- Auth ----------
+    btnLogin.addEventListener('click', async () => {
+      loginError.textContent = '';
+      try {
+        await signInWithEmailAndPassword(auth, loginEmail.value.trim(), loginPass.value.trim());
+        setRoleByCheckbox();
+      } catch (e) { loginError.textContent = e.message; }
+    });
+
+    btnRegister.addEventListener('click', async () => {
+      loginError.textContent = '';
+      try {
+        await createUserWithEmailAndPassword(auth, loginEmail.value.trim(), loginPass.value.trim());
+        setRoleByCheckbox();
+      } catch (e) { loginError.textContent = e.message; }
+    });
+
+    function setRoleByCheckbox() {
+      if (isCurator.checked) {
+        if (curatorCode.value.trim() === "curratorPO115") {
+          currentRole = 'curator';
+        } else {
+          currentRole = 'starosta';
+          alert('Неверный код куратора — войдёте как староста.');
+        }
+      } else currentRole = 'starosta';
+    }
+
+    onAuthStateChanged(auth, (user) => {
+      currentUser = user;
+      if (user) {
+        loginView.classList.add('hidden');
+        appView.classList.remove('hidden');
+        userEmailPill.textContent = user.email;
+        rolePill.textContent = 'Роль: ' + (currentRole === 'curator' ? 'Куратор' : 'Староста');
+        datePicker.value = todayKey();
+        attachSubscriptions();
+      } else {
+        if (unsubStudents) unsubStudents();
+        if (unsubDay) unsubDay();
+        loginView.classList.remove('hidden');
+        appView.classList.add('hidden');
+        loginEmail.value = '';
+        loginPass.value = '';
+      }
+    });
+
+    btnLogout.addEventListener('click', () => signOut(auth));
+
+    // ---------- Date nav ----------
+    btnToday.addEventListener('click', () => { datePicker.value = todayKey(); attachSubscriptions(); });
+    btnPrev.addEventListener('click', () => {
+      const d = fromDateKey(datePicker.value || todayKey()); d.setDate(d.getDate()-1);
+      datePicker.value = toDateKey(d); attachSubscriptions();
+    });
+    btnNext.addEventListener('click', () => {
+      const d = fromDateKey(datePicker.value || todayKey()); d.setDate(d.getDate()+1);
+      datePicker.value = toDateKey(d); attachSubscriptions();
+    });
+    datePicker.addEventListener('change', attachSubscriptions);
+
+    // ---------- Students add ----------
+    btnAddStudent.addEventListener('click', async () => {
+      if (currentRole !== 'curator') { alert('Добавлять студентов может только куратор.'); return; }
+      const name = prompt('ФИО студента:');
+      if (!name) return;
+
+      // найдём максимальный order
+      const qy = query(collStudents(), orderBy('order','desc'));
+      const snap = await getDocs(qy);
+      let nextOrder = 1;
+      if (!snap.empty) nextOrder = (snap.docs[0].data().order || 0) + 1;
+      await addDoc(collStudents(), { name, order: nextOrder });
+    });
+
+    // ---------- Seed week ----------
+    btnSeedWeek.addEventListener('click', async () => {
+      if (currentRole !== 'curator') { alert('Генерация дней — только для куратора.'); return; }
+      const start = fromDateKey(datePicker.value || todayKey());
+      const day = start.getDay(); // 0-вс, 1-пн
+      const shift = (day === 0 ? -6 : 1 - day);
+      start.setDate(start.getDate() + shift);
+
+      const students = await getDocs(query(collStudents(), orderBy('order','asc')));
+
+      for (let i=0;i<6;i++){ // пн-сб
+        const d = new Date(start); d.setDate(start.getDate()+i);
+        const dk = toDateKey(d);
+        await setDoc(docAttendanceDate(dk), { createdAt: serverTimestamp() }, { merge:true });
+
+        for (const st of students.docs) {
+          await setDoc(doc(db,'attendance',dk,'students',st.id), {
+            name: st.data().name,
+            college:'present', p1:'present', p2:'present', p3:'present', p4:'present',
+            note:'',
+            updatedBy: currentUser.email,
+            updatedAt: serverTimestamp()
+          }, { merge:true });
+        }
+      }
+      alert('Неделя сгенерирована (пн–сб).');
+    });
+
+    // ---------- Subscriptions ----------
+    function attachSubscriptions() {
+      const dateKey = datePicker.value || todayKey();
+
+      if (unsubStudents) unsubStudents();
+      if (unsubDay) unsubDay();
+
+      unsubStudents = onSnapshot(query(collStudents(), orderBy('order','asc')), () => renderTable());
+      unsubDay = onSnapshot(collAttendanceStudents(dateKey), () => renderTable());
+    }
+
+    // ---------- Render ----------
+    async function renderTable() {
+      const dateKey = datePicker.value || todayKey();
+      const studentsSnap = await getDocs(query(collStudents(), orderBy('order','asc')));
+      const daySnap = await getDocs(collAttendanceStudents(dateKey));
+
+      const dayMap = new Map();
+      daySnap.forEach(d => dayMap.set(d.id, d.data()));
+
+      tbody.innerHTML = '';
+      let idx = 1;
+
+      for (const st of studentsSnap.docs) {
+        const s = st.data();
+        const rowData = dayMap.get(st.id) || {
+          name: s.name, college:'present', p1:'present', p2:'present', p3:'present', p4:'present', note:''
+        };
+
+        const tr = document.createElement('tr');
+        tr.className = "border-b border-slate-300/20";
+
+        tr.innerHTML = `
+          <td class="text-slate-500">${idx}</td>
+          <td>${escapeHtml(s.name)}</td>
+          <td>${statusSelect('college', rowData.college)}</td>
+          <td>${statusSelect('p1', rowData.p1)}</td>
+          <td>${statusSelect('p2', rowData.p2)}</td>
+          <td>${statusSelect('p3', rowData.p3)}</td>
+          <td>${statusSelect('p4', rowData.p4)}</td>
+          <td><input class="note fade" data-field="note" value="${escapeAttr(rowData.note||'')}" placeholder="—"></td>
+          <td class="w-10">
+            ${currentRole==='curator' ? '<button class="btn btn-ghost text-red-500 h-8 px-2" data-action="remove">×</button>' : '<span class="muted">—</span>'}
+          </td>
+        `;
+
+        tr.querySelectorAll('select').forEach(sel => {
+          sel.addEventListener('change', async (e) => {
+            const field = e.target.dataset.field;
+            const value = e.target.value;
+            await saveField(dateKey, st.id, s.name, field, value);
+          });
+        });
+
+        const noteInput = tr.querySelector('input[data-field="note"]');
+        noteInput.addEventListener('change', async (e) => {
+          await saveField(dateKey, st.id, s.name, 'note', e.target.value);
+        });
+
+        const btnRemove = tr.querySelector('[data-action="remove"]');
+        if (btnRemove) {
+          btnRemove.addEventListener('click', async () => {
+            if (!confirm(`Удалить студента «${s.name}»?`)) return;
+            await deleteDoc(doc(db,'students',st.id));
+          });
+        }
+
+        tbody.appendChild(tr);
+        idx++;
+      }
+    }
+
+    // ---------- Save + Sheets sync ----------
+    async function saveField(dateKey, studentId, studentName, field, value) {
+      await setDoc(doc(db, 'attendance', dateKey, 'students', studentId), {
+        name: studentName,
+        [field]: value,
+        updatedBy: currentUser.email,
+        updatedAt: serverTimestamp()
+      }, { merge:true });
+
+      // лог в Google Sheets
+      try {
+        fetch(APPS_SCRIPT_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dateKey,
+            studentId,
+            studentName,
+            field,
+            value,
+            userEmail: currentUser.email,
+            role: currentRole
+          })
+        }).catch(()=>{});
+      } catch(e) {}
+    }
+  </script>
+</body>
+</html>
